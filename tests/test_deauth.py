@@ -6,6 +6,7 @@ import mock
 import scapy.layers.dot11 as dot11
 import wifiphisher.extensions.deauth as deauth
 import wifiphisher.common.constants as constants
+import wifiphisher.common.extensioncmds as extensioncmds
 
 
 class TestDeauth(unittest.TestCase):
@@ -29,18 +30,23 @@ class TestDeauth(unittest.TestCase):
         self.target_essid = "Evil"
         self.args = mock.Mock()
         self.args.deauth_essid = False
+        self.args.channel_monitor = False
 
         data0 = custom_tuple(self.target_bssid, self.target_channel, self.rogue_mac,
                              self.args, self.target_essid, True)
         data1 = custom_tuple(None, self.target_channel, self.rogue_mac,
                              self.args, self.target_essid, True)
+        # data2 doesn't allow frequency hopping
+        data2 = custom_tuple(None, self.target_channel, self.rogue_mac,
+                             self.args, self.target_essid, False)
 
         self.deauth_obj0 = deauth.Deauth(data0)
         self.deauth_obj1 = deauth.Deauth(data1)
+        self.deauth_obj2 = deauth.Deauth(data2)
 
         # test for --deauth-essid
-        self.deauth_obj0._deauth_bssids = set()
-        self.deauth_obj1._deauth_bssids = set()
+        self.deauth_obj0._deauth_bssids = dict()
+        self.deauth_obj1._deauth_bssids = dict()
 
     def test_craft_packet_normal_expected(self):
         """
@@ -103,6 +109,48 @@ class TestDeauth(unittest.TestCase):
         self.assertEqual(result[1][1].addr1, constants.WIFI_BROADCAST, message1)
         self.assertEqual(result[1][1].addr2, self.target_bssid, message1)
         self.assertEqual(result[1][1].addr3, self.target_bssid, message1)
+
+    def test_send_channel_update_command_broadcast(self):
+        """
+        Test get_packet method for crafting the broadcast frame
+        """
+
+        # suppose default target channel is 3
+        self.deauth_obj0._deauth_bssids[self.target_bssid] = str(3)
+
+        # setup the packet
+        sender = "00:00:00:00:00:00"
+        receiver = "11:11:11:11:11:11"
+        essid = dot11.Dot11Elt(ID='SSID', info="")
+        rates = dot11.Dot11Elt(ID='Rates', info="\x03\x12\x96\x18\x24\x30\x48\x60")
+        dsset = dot11.Dot11Elt(ID='DSset', info='\x06')
+        packet = dot11.RadioTap() / dot11.Dot11() / dot11.Dot11Beacon() / essid / rates / dsset
+
+        packet.addr1 = receiver
+        packet.addr2 = sender
+        packet.addr3 = self.target_bssid
+        packet.FCfield = 0x0
+
+        # run the method
+        pkts_to_send = []
+        self.deauth_obj0._send_channel_update_command(
+            self.target_bssid, str(6), pkts_to_send)
+
+        message0 = "Failed to return an correct channel"
+        message1 = "Failed to return an correct packets"
+
+        # check the packets
+        # check the disassoction packet
+        self.assertEqual(pkts_to_send[0].subtype, 10, message1)
+        self.assertEqual(pkts_to_send[0].addr1, constants.WIFI_BROADCAST, message1)
+        self.assertEqual(pkts_to_send[0].addr2, self.target_bssid, message1)
+        self.assertEqual(pkts_to_send[0].addr3, self.target_bssid, message1)
+
+        # check the deauthentication packet
+        self.assertEqual(pkts_to_send[1].subtype, 12, message1)
+        self.assertEqual(pkts_to_send[1].addr1, constants.WIFI_BROADCAST, message1)
+        self.assertEqual(pkts_to_send[1].addr2, self.target_bssid, message1)
+        self.assertEqual(pkts_to_send[1].addr3, self.target_bssid, message1)
 
     def test_get_packet_second_run_non_releavent_client_empty(self):
         """
@@ -208,7 +256,7 @@ class TestDeauth(unittest.TestCase):
         self.packet.addr3 = bssid0
 
         # add target_bssid in the self._deauth_bssids
-        self.deauth_obj0._deauth_bssids.add(self.target_bssid)
+        self.deauth_obj0._deauth_bssids[self.target_bssid] = self.target_channel
 
         # run the method
         result0 = self.deauth_obj0.get_packet(self.packet)
@@ -293,7 +341,7 @@ class TestDeauth(unittest.TestCase):
         self.packet.addr3 = bssid
 
         # add the bssid to the deauth_bssid set
-        self.deauth_obj1._deauth_bssids.add(bssid)
+        self.deauth_obj1._deauth_bssids[bssid] = self.target_channel
 
         # run the method
         result = self.deauth_obj1.get_packet(self.packet)
@@ -641,7 +689,7 @@ class TestDeauth(unittest.TestCase):
         self.packet.addr3 = bssid
 
         # run the method
-        self.deauth_obj1._deauth_bssids.add(bssid)
+        self.deauth_obj1._deauth_bssids[bssid] = str(1)
         self.deauth_obj1.get_packet(self.packet)
         actual = self.deauth_obj1.send_output()
         expected = "DEAUTH/DISAS - {}".format(sender)
@@ -671,7 +719,7 @@ class TestDeauth(unittest.TestCase):
         self.packet.addr3 = bssid0
 
         # run the method
-        self.deauth_obj1._deauth_bssids.add(bssid0)
+        self.deauth_obj1._deauth_bssids[bssid0] = str(1)
         self.deauth_obj1.get_packet(self.packet)
 
         # change the packet details
@@ -680,7 +728,7 @@ class TestDeauth(unittest.TestCase):
         self.packet.addr3 = bssid1
 
         # run the method again
-        self.deauth_obj1._deauth_bssids.add(bssid1)
+        self.deauth_obj1._deauth_bssids[bssid1] = str(1)
         self.deauth_obj1.get_packet(self.packet)
 
         actual = self.deauth_obj1.send_output()
@@ -715,6 +763,19 @@ class TestDeauth(unittest.TestCase):
         message = "Failed to send all the channels"
 
         expected = [str(ch) for ch in range(1, 14)]
+
+        self.assertEqual(expected, actual, message)
+
+    def test_send_channels_freqhop_abandon_target_channel(self):
+        """
+        Test send_channels when frequency hopping is not allowed
+        """
+
+        actual = self.deauth_obj2.send_channels()
+
+        message = "Failed to send all the channels"
+
+        expected = [str(self.target_channel)]
 
         self.assertEqual(expected, actual, message)
 

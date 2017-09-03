@@ -33,6 +33,9 @@ class Extension1(object):
 
     def send_output(self):
         return ["one", "two"]
+
+    def send_channels(self):
+        return [str(1), str(2)]
 """
 
 CONTENTS_EXTENSION_2 = """
@@ -50,7 +53,11 @@ class Extension2(object):
 
     def send_output(self):
         return ["three", "four", "five"]
+
+    def send_channels(self):
+        return [str(2), str(5), str(10)]
 """
+
 
 class TestExtensionManager(unittest.TestCase):
 
@@ -66,7 +73,8 @@ class TestExtensionManager(unittest.TestCase):
             f.write(CONTENTS_EXTENSION_2)
             f.close()
 
-    @mock.patch("wifiphisher.common.constants.DEFAULT_EXTENSIONS", ["extension1"])
+    @mock.patch("wifiphisher.common.constants.DEFAULT_EXTENSIONS",
+                ["extension1"])
     @mock.patch(
         "wifiphisher.common.constants.EXTENSIONS_LOADPATH",
         "tests.extensions.")
@@ -126,6 +134,86 @@ class TestExtensionManager(unittest.TestCase):
         # Output has also been merged in one list.
         # Validate with send_output()
         assert em.get_output() == ["one", "two", "three", "four", "five"]
+
+    @mock.patch(
+        "wifiphisher.common.constants.DEFAULT_EXTENSIONS", [
+            "extension1", "extension2"])
+    @mock.patch(
+        "wifiphisher.common.constants.EXTENSIONS_LOADPATH",
+        "tests.extensions.")
+    def test_get_channels_list(self):
+        """
+        Test get_channels to get the correct channels from extension
+        modules
+        """
+        # We need a NM to init EM
+        nm = interfaces.NetworkManager()
+        # Init an EM and pass some shared data
+        em = extensions.ExtensionManager(nm)
+        em.set_extensions(constants.DEFAULT_EXTENSIONS)
+        shared_data = {"one": 1, "two": 2, "is_freq_hop_allowed": True}
+        em.init_extensions(shared_data)
+        em._channels_to_hop = list()
+        em.get_channels()
+        expected = [str(1), str(2), str(5), str(10)]
+        message = "Failed to return the correct channels"
+        self.assertEqual(len(expected), len(em._channels_to_hop),
+                         message)
+        fail = 0
+        for channel in expected:
+            if channel not in em._channels_to_hop:
+                fail = 1
+        self.assertEqual(fail, 0, message)
+
+    @mock.patch(
+        "wifiphisher.common.constants.DEFAULT_EXTENSIONS", [
+            "extension1", "extension2"])
+    @mock.patch(
+        "wifiphisher.common.constants.EXTENSIONS_LOADPATH",
+        "tests.extensions.")
+    def test_clear_deauth_frames(self):
+        # We need a NM to init EM
+        nm = interfaces.NetworkManager()
+        # Init an EM and pass some shared data
+        em = extensions.ExtensionManager(nm)
+        em.set_extensions(constants.DEFAULT_EXTENSIONS)
+        shared_data = {"one": 1, "two": 2, "is_freq_hop_allowed": True}
+        em.init_extensions(shared_data)
+        # A deauth packet appears in the air
+        deauth_packet = (
+            dot11.RadioTap() /
+            dot11.Dot11(
+                type=0,
+                subtype=12,
+                addr1="00:00:00:00:00:00",
+                addr2="00:00:00:00:00:00",
+                addr3="00:00:00:00:00:00") /
+            dot11.Dot11Deauth())
+
+        # craft disassociation packet
+        disassoc_part = dot11.Dot11(type=0,
+                                    subtype=10,
+                                    addr1="00:00:00:00:00:00",
+                                    addr2="00:00:00:00:00:00",
+                                    addr3="00:00:00:00:00:00")
+        disassoc_packet = (dot11.RadioTap() / disassoc_part /
+                           dot11.Dot11Disas())
+
+        # craft other packet
+        beacon_part = dot11.Dot11(type=0,
+                                  subtype=8,
+                                  addr1="00:00:00:00:00:00",
+                                  addr2="00:00:00:00:00:00",
+                                  addr3="00:00:00:00:00:00")
+        beacon_packet = (dot11.RadioTap() / beacon_part / dot11.Dot11Beacon())
+
+        old_channel = "1"
+        em._packets_to_send[old_channel] = [deauth_packet,
+                                            disassoc_packet,
+                                            beacon_packet]
+        em.clear_deauth_frames(old_channel, "00:00:00:00:00:00")
+        self.assertEqual(em._packets_to_send[old_channel],
+                         [beacon_packet])
 
     def tearDown(self):
         shutil.rmtree("tests/extensions")
