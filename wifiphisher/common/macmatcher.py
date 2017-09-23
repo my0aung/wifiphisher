@@ -172,3 +172,25 @@ def parse_oui_file(oui_file):
     file_handler.close()
 
     return vendor_information
+
+
+def mac_to_oui(mac_address):
+    """
+    Return the OUI(first 3 octests) of the given mac address
+
+    :param mac_address: A mac address
+    :type mac_address: str
+    :return: The OUI of the mac address
+    :rtype: str
+    :Example:
+
+    >>> mac_address = "ac:23:4d:67:78:9a"
+    >>> oui = mac_to_oui(mac_address)
+    >>> oui
+    AC234D
+
+    .. note: The return value is going to be in uppercase.
+    """
+
+    return mac_address.replace(":", "").upper()[0:6]
+
