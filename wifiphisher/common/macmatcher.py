@@ -130,3 +130,45 @@ class MACMatcher(object):
         """
 
         del self._mac_to_vendor
+
+
+########################################
+# everything after this line is for the next patch
+########################################
+
+
+def parse_oui_file(oui_file):
+    """
+    Return a dictionary containing the vendors information parsed
+    from the oui_file
+
+    :param oui_file: Location of the oui_file
+    :type oui_file: str
+    :return: dictionary containing parsed vendors
+    :rtype: dict
+    :Example:
+
+    # assuming somefile.txt contains:
+    # 45a23b|Fake|fake.svg
+    >>> oui_file = "somefile.txt"
+    >>> my_dict = parse_oui_file(oui_file)
+    >>> my_dict
+    {"45a23b": ("Fake", "fake.svg")
+    """
+
+    vendor_information = dict()
+    file_handler = open(oui_file, "r")
+
+    for line in file_handler:
+        if not line.startswith("#"):
+            parsed_line = line.rstrip('\n').split('|')
+
+            identifier = parsed_line[0]
+            vendor_name = parsed_line[1]
+            logo_name = parsed_line[2]
+
+            vendor_information[identifier] = (vendor_name, logo_name)
+
+    file_handler.close()
+
+    return vendor_information
